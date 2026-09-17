@@ -1,5 +1,6 @@
 #include <QtTest>
 #include <QFont>
+#include <QQuickTextDocument>
 #include <QTextDocument>
 #include <QTextLayout>
 #include <QQmlComponent>
@@ -100,6 +101,82 @@ private slots:
         QCOMPARE(emphasis.at(2).content.length, 4);
     }
 
+    void respectsEscapedOpeningBackticks() {
+        const auto escaped = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral(R"(\` *italic* \`)"));
+        QCOMPARE(escaped.size(), 1);
+        QCOMPARE(escaped.constFirst().kind, MarkdownHighlighter::InlineKind::Italic);
+        QVERIFY(MarkdownHighlighter::codeSpans(QStringLiteral(R"(\` *italic* \`)")).isEmpty());
+
+        const QString mixed = QStringLiteral(R"(\` *italic* `*literal*`)");
+        QCOMPARE(MarkdownHighlighter::inlineMarkup(mixed).size(), 1);
+        const auto code = MarkdownHighlighter::codeSpans(mixed);
+        QCOMPARE(code.size(), 1);
+        QCOMPARE(mixed.mid(code.constFirst().start, code.constFirst().length),
+                 QStringLiteral("`*literal*`"));
+
+        // An escaped backslash leaves the opening backtick active.
+        QVERIFY(MarkdownHighlighter::inlineMarkup(
+            QStringLiteral(R"(\\`*literal*`)")).isEmpty());
+        QCOMPARE(MarkdownHighlighter::codeSpans(
+            QStringLiteral(R"(\\`*literal*`)")).size(), 1);
+
+        // Backslashes inside code do not escape its closing delimiter.
+        const auto afterCode = MarkdownHighlighter::inlineMarkup(
+            QStringLiteral(R"(`code\` *italic*)"));
+        QCOMPARE(afterCode.size(), 1);
+        QCOMPARE(afterCode.constFirst().kind, MarkdownHighlighter::InlineKind::Italic);
+    }
+
+    void keepsEnclosedCodeStyling_data() {
+        QTest::addColumn<QString>("text");
+        QTest::addColumn<int>("kind");
+        QTest::newRow("italic") << QStringLiteral("*a `code` b*")
+                                << int(MarkdownHighlighter::InlineKind::Italic);
+        QTest::newRow("bold") << QStringLiteral("**a `code` b**")
+                              << int(MarkdownHighlighter::InlineKind::Bold);
+        QTest::newRow("link") << QStringLiteral("[a `code` b](https://example.com)")
+                              << int(MarkdownHighlighter::InlineKind::Link);
+    }
+
+    void keepsEnclosedCodeStyling() {
+        QFETCH(QString, text);
+        QFETCH(int, kind);
+        QTextDocument document;
+        document.setPlainText(text);
+        MarkdownHighlighter highlighter(&document);
+        highlighter.setColors("#101010", "#eeeeee", "#5584aa", "#23372b");
+        highlighter.rehighlight();
+
+        const auto formatAt = [&document](int position) {
+            for (const auto &range : document.firstBlock().layout()->formats()) {
+                if (position >= range.start && position < range.start + range.length)
+                    return range.format;
+            }
+            return QTextCharFormat();
+        };
+        const auto markup = MarkdownHighlighter::inlineMarkup(text);
+        QCOMPARE(markup.size(), 1);
+        QCOMPARE(int(markup.constFirst().kind), kind);
+        const auto prose = formatAt(text.indexOf(QLatin1Char('a')));
+        QCOMPARE(prose.fontItalic(), kind == int(MarkdownHighlighter::InlineKind::Italic));
+        QCOMPARE(prose.fontWeight() == QFont::Bold,
+                 kind == int(MarkdownHighlighter::InlineKind::Bold));
+        QCOMPARE(prose.fontUnderline(), kind == int(MarkdownHighlighter::InlineKind::Link));
+        QCOMPARE(prose.background().style(), Qt::NoBrush);
+
+        const int codeStart = text.indexOf(QLatin1Char('`'));
+        for (int i = codeStart; i < codeStart + 6; ++i) {
+            const auto code = formatAt(i);
+            QCOMPARE(code.background().color(), QColor("#23372b"));
+            QVERIFY(!code.fontItalic());
+            QVERIFY(code.fontWeight() != QFont::Bold);
+            QVERIFY(!code.fontUnderline());
+        }
+        for (const auto &marker : markup.constFirst().markers)
+            QCOMPARE(formatAt(marker.start).fontPointSize(), 1.0);
+    }
+
     void leavesFencedCodeLiteral() {
         QTextDocument document;
         document.setPlainText(QStringLiteral("prose _italic_\n"
@@ -108,6 +185,7 @@ private slots:
                                             "```\n"
                                             "after _italic_\n"));
         MarkdownHighlighter highlighter(&document);
+        highlighter.setColors("#101010", "#eeeeee", "#5584aa", "#23372b");
         highlighter.rehighlight();
 
         const auto stateOf = [&document](int blockNumber) {
@@ -139,6 +217,43 @@ private slots:
                             }));
     }
 
+    void keepsCaretRangesConsistentWithCode() {
+        Backend backend;
+        QQmlEngine engine;
+        QQmlComponent component(&engine);
+        component.setData("import QtQuick\nTextEdit {}", QUrl());
+        QVERIFY2(component.isReady(), qPrintable(component.errorString()));
+        QScopedPointer<QObject> editor(component.create());
+        QVERIFY2(editor, qPrintable(component.errorString()));
+        auto *quickDocument = editor->property("textDocument").value<QQuickTextDocument *>();
+        QVERIFY(quickDocument);
+        backend.attachDocument(quickDocument);
+        auto *document = quickDocument->textDocument();
+        auto *highlighter = document->findChild<MarkdownHighlighter *>();
+        QVERIFY(highlighter);
+        editor->setProperty("text", QStringLiteral("``` **opening**\n"
+                                                   "# _literal_ [link](url)\n"
+                                                   "``` **closing**\n"
+                                                   "*prose*\n"
+                                                   "`*literal*`\n"
+                                                   "```\n"
+                                                   "_unterminated_"));
+        highlighter->rehighlight();
+        for (int blockNumber : {0, 1, 2, 4, 5, 6}) {
+            const auto block = document->findBlockByNumber(blockNumber);
+            QVERIFY(backend.hiddenRangesAt(block.position()).isEmpty());
+        }
+        QCOMPARE(backend.hiddenRangesAt(document->findBlockByNumber(3).position()).size(), 2);
+
+        // Removing a fence rehighlights the following blocks as prose.
+        QTextCursor cursor(document);
+        cursor.setPosition(document->findBlockByNumber(5).position());
+        cursor.movePosition(QTextCursor::EndOfBlock, QTextCursor::KeepAnchor);
+        cursor.removeSelectedText();
+        QTRY_COMPARE(document->findBlockByNumber(6).userState(), int(MarkdownHighlighter::Prose));
+        QCOMPARE(backend.hiddenRangesAt(document->findBlockByNumber(6).position()).size(), 2);
+    }
+
     void takesTheCodePanelFromTheTheme() {
         QTemporaryDir homeDirectory;
         QVERIFY(homeDirectory.isValid());
@@ -154,13 +269,17 @@ private slots:
             + QStringLiteral("/.local/state/omarchy/current/theme");
         QVERIFY(QDir().mkpath(themeDirectory));
 
-        const auto codePanelFor = [&themeDirectory](const QByteArray &palette) {
+        Backend backend;
+        const auto codePanelFor = [&themeDirectory, &backend](const QByteArray &palette) {
             QFile colorsFile(themeDirectory + QStringLiteral("/colors.toml"));
             if (!colorsFile.open(QIODevice::WriteOnly | QIODevice::Truncate | QIODevice::Text))
                 return QColor();
             colorsFile.write(palette);
             colorsFile.close();
-            return QColor(Backend().themeCodeBackground());
+            // Reload the same backend so a missing key cannot inherit the
+            // previous theme's panel color.
+            backend.setDarkMode(!backend.darkMode());
+            return QColor(backend.themeCodeBackground());
         };
 
         // The shade the theme names for panels wins.
@@ -183,6 +302,11 @@ private slots:
                                                "foreground = \"#000000\"\n");
         QVERIFY(mixedLight != QColor(Qt::white));
         QVERIFY(mixedLight.lightness() > 195);
+
+        QCOMPARE(codePanelFor("mode = \"light\"\n"
+                              "background = \"#ffffff\"\n"
+                              "foreground = \"#000000\"\n"
+                              "lighter_background = \"garbage\"\n"), mixedLight);
 
         // A theme whose lighter background is the page itself would leave code
         // with no panel at all, so it falls back to the mix as well.

@@ -51,9 +51,6 @@ void MarkdownHighlighter::rebuildFormats() {
     const QColor link = !m_customAccent.isEmpty() ? QColor(m_customAccent)
         : (m_darkMode ? QColor(QStringLiteral("#5584aa")) : QColor(QStringLiteral("#2077b2")));
     const QColor quote = marker;
-    const QColor codeBackground = !m_customCodeBackground.isEmpty()
-        ? QColor(m_customCodeBackground)
-        : (m_darkMode ? QColor(QStringLiteral("#1c1a1a")) : QColor(QStringLiteral("#f8f8f8")));
 
     m_markerFormat = QTextCharFormat();
     m_markerFormat.setForeground(marker);
@@ -87,7 +84,8 @@ void MarkdownHighlighter::rebuildFormats() {
 
     m_codeFormat = QTextCharFormat();
     m_codeFormat.setForeground(text);
-    m_codeFormat.setBackground(codeBackground);
+    if (!m_customCodeBackground.isEmpty())
+        m_codeFormat.setBackground(QColor(m_customCodeBackground));
 
     // A fence recedes the way a heading's `#` does, over the panel it opens.
     m_fenceFormat = m_codeFormat;
@@ -115,7 +113,10 @@ void MarkdownHighlighter::highlightBlock(const QString &text) {
     // block, and Qt rehighlights the rest of the document when it changes.
     const bool fence = isFence(text);
     const bool insideFence = previousBlockState() == InsideFence;
-    setCurrentBlockState(fence == insideFence ? Prose : InsideFence);
+    if (fence)
+        setCurrentBlockState(insideFence ? Prose : InsideFence);
+    else
+        setCurrentBlockState(insideFence ? InsideFence : Prose);
 
     if (fence || insideFence) {
         setFormat(0, text.length(), fence ? m_fenceFormat : m_codeFormat);
@@ -202,9 +203,6 @@ void MarkdownHighlighter::highlightMarkers(const QString &text) {
 }
 
 void MarkdownHighlighter::highlightInline(const QString &text) {
-    for (const Span &code : codeSpans(text))
-        setFormat(code.start, code.length, m_codeFormat);
-
     const QList<InlineMarkup> markup = inlineMarkup(text);
     for (const InlineMarkup &item : markup) {
         const QTextCharFormat &contentFormat =
@@ -215,6 +213,11 @@ void MarkdownHighlighter::highlightInline(const QString &text) {
         for (const Span &marker : item.markers)
             setFormat(marker.start, marker.length, m_hiddenMarkerFormat);
     }
+
+    // setFormat replaces rather than merges. Code keeps its own styling even
+    // when emphasis or a link surrounds it.
+    for (const Span &code : codeSpans(text))
+        setFormat(code.start, code.length, m_codeFormat);
 }
 
 QList<MarkdownHighlighter::Span> MarkdownHighlighter::codeSpans(const QString &text) {
@@ -223,10 +226,26 @@ QList<MarkdownHighlighter::Span> MarkdownHighlighter::codeSpans(const QString &t
         return spans;
 
     static const QRegularExpression codeRe(QStringLiteral("`([^`]+)`"));
-    QRegularExpressionMatchIterator codeMatches = codeRe.globalMatch(text);
-    while (codeMatches.hasNext()) {
-        const QRegularExpressionMatch match = codeMatches.next();
-        spans.append({int(match.capturedStart(0)), int(match.capturedLength(0))});
+    int from = 0;
+    while ((from = text.indexOf(QLatin1Char('`'), from)) >= 0) {
+        int backslashes = 0;
+        for (int i = from - 1; i >= 0 && text.at(i) == QLatin1Char('\\'); --i)
+            ++backslashes;
+        if (backslashes % 2 != 0) {
+            ++from;
+            continue;
+        }
+
+        // Backslashes escape opening backticks in prose, but are literal once
+        // inside code, including immediately before the closing backtick.
+        const auto match = codeRe.match(text, from, QRegularExpression::NormalMatch,
+                                        QRegularExpression::AnchorAtOffsetMatchOption);
+        if (!match.hasMatch()) {
+            ++from;
+            continue;
+        }
+        spans.append({from, int(match.capturedLength(0))});
+        from = match.capturedEnd(0);
     }
     return spans;
 }

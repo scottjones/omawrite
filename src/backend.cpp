@@ -384,7 +384,8 @@ QVariantList Backend::hiddenRangesAt(int position) const {
         return ranges;
 
     // The highlighter leaves fenced code alone, so it hides nothing there.
-    if (block.userState() == MarkdownHighlighter::InsideFence)
+    if (block.userState() == MarkdownHighlighter::InsideFence
+            || MarkdownHighlighter::isFence(block.text()))
         return ranges;
 
     const int lineStart = block.position();
@@ -594,9 +595,7 @@ void Backend::loadOmarchyTheme() {
     m_themeForeground = m_darkMode ? QStringLiteral("#eeeeee") : QStringLiteral("#222324");
     m_themeAccent = m_darkMode ? QStringLiteral("#5584aa") : QStringLiteral("#2077b2");
     m_themeSelection = m_darkMode ? QStringLiteral("#186a9a") : QStringLiteral("#2077b2");
-    // Left empty when the theme sets no lighter background; the highlighter
-    // mixes its own shade of the page in that case.
-    m_themeLighterBackground.clear();
+    QString lighterBackground;
 
     const QString colorsPath = QDir::homePath()
         + QStringLiteral("/.local/state/omarchy/current/theme/colors.toml");
@@ -631,7 +630,7 @@ void Backend::loadOmarchyTheme() {
             else if (key == QStringLiteral("selection"))
                 m_themeSelection = value;
             else if (key == QStringLiteral("lighter_background"))
-                m_themeLighterBackground = value;
+                lighterBackground = value;
         }
     }
 
@@ -663,7 +662,7 @@ void Backend::loadOmarchyTheme() {
     // panel at all: mix a shade of the page towards the text for those. Mixing,
     // unlike lightening, still moves on a pure black background.
     const QColor page(m_themeBackground);
-    const QColor lighter(m_themeLighterBackground);
+    const QColor lighter(lighterBackground);
     m_themeCodeBackground = (lighter.isValid() && lighter != page
                                  ? lighter
                                  : blend(page, QColor(m_themeForeground), 0.06)).name();

@@ -39,13 +39,13 @@ public:
 
     // Inline code spans, backticks included.
     static QList<Span> codeSpans(const QString &text);
+    static bool isFence(const QString &text);
 
 protected:
     void highlightBlock(const QString &text) override;
 
 private:
     void rebuildFormats();
-    static bool isFence(const QString &text);
     void highlightMarkers(const QString &text);
     void highlightInline(const QString &text);
     void highlightSearch(const QString &text);
