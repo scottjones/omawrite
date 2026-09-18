@@ -95,7 +95,7 @@ QVariantList formattedCells(QVariantList row, QList<int> &lengths) {
     return row;
 }
 
-QVariantList scanTables(const QString &text, bool firstOnly) {
+QVariantList scanTables(const QString &text, bool formatCells) {
     const auto lines = text.split(QLatin1Char('\n'));
     QList<int> offsets;
     int offset = 0;
@@ -143,21 +143,22 @@ QVariantList scanTables(const QString &text, bool firstOnly) {
             continue;
 
         const int start = offsets.at(i);
-        // The footer only needs to know whether a table exists. Avoid parsing
-        // every body cell and creating QTextDocuments after each typing pause.
-        if (firstOnly)
-            return {QVariantMap{{"start", start}}};
         int end = offsets.at(i + 1) + lines.at(i + 1).size();
         QVariantList rows;
         QList<int> lengths(header.size(), 0);
-        QList<int> headingLengths(header.size(), 0);
-        const auto formattedHeader = formattedCells(header, headingLengths);
         ++i;
         while (i + 1 < lines.size()) {
             const auto &line = lines.at(i + 1);
             if (line.trimmed().isEmpty() || blockStartRe.match(line).hasMatch()
                     || ruleRe.match(line).hasMatch())
                 break;
+            // Caret-aware footer visibility only needs the table bounds. Do
+            // not format cells or retain rows while detecting tables as we type.
+            if (!formatCells) {
+                ++i;
+                end = offsets.at(i) + lines.at(i).size();
+                continue;
+            }
             auto row = cells(line, offsets.at(i + 1), true);
             // GFM pads short body rows and ignores excess cells for display.
             // Source ranges still refer to the untouched Markdown.
@@ -169,6 +170,12 @@ QVariantList scanTables(const QString &text, bool firstOnly) {
             ++i;
             end = offsets.at(i) + lines.at(i).size();
         }
+        if (!formatCells) {
+            tables.append(QVariantMap{{"start", start}, {"end", end}});
+            continue;
+        }
+        QList<int> headingLengths(header.size(), 0);
+        const auto formattedHeader = formattedCells(header, headingLengths);
         QVariantList weights;
         for (int column = 0; column < header.size(); ++column) {
             const int average = rows.isEmpty() ? 0 : lengths.at(column) / rows.size();
@@ -185,9 +192,9 @@ QVariantList scanTables(const QString &text, bool firstOnly) {
 }
 
 QVariantList MarkdownTables::parse(const QString &text) {
-    return scanTables(text, false);
+    return scanTables(text, true);
 }
 
-bool MarkdownTables::containsTable(const QString &text) {
-    return !scanTables(text, true).isEmpty();
+QVariantList MarkdownTables::ranges(const QString &text) {
+    return scanTables(text, false);
 }

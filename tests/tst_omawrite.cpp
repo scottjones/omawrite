@@ -202,6 +202,7 @@ private slots:
         const QString source = QStringLiteral("Before\n\n| Area | State |\n| --- | --- |\n"
                                                "| Branches | ready |\n\nAfter\n");
         editor->setProperty("text", source);
+        editor->setProperty("cursorPosition", source.indexOf("Branches"));
         QTRY_VERIFY(button->property("visible").toBool());
         QTemporaryDir directory;
         const auto path = directory.filePath("table.md");
@@ -229,6 +230,65 @@ private slots:
         QFile file(path);
         QVERIFY(file.open(QIODevice::ReadOnly));
         QCOMPARE(QString::fromUtf8(file.readAll()), QString(source).replace("ready", "changed"));
+    }
+
+    void showsTableButtonOnlyAtTheCaret() {
+        const QString source = QStringLiteral("Before \U0001F642\n\n"
+            "A | B\n--- | ---\nfirst | row\n\nBetween\n\n"
+            "C | D\n--- | ---\nsecond | row\n\nAfter\n\n"
+            "```\nFake | Table\n--- | ---\nnot | real\n```\n");
+        TablePreviewHarness ui;
+        QVERIFY2(ui.load(source), qPrintable(ui.component.errorString()));
+        QTRY_VERIFY(ui.window->isActive());
+        QTRY_VERIFY(ui.window->property("hasTables").toBool());
+        auto *button = ui.item("tablesButton");
+        QVERIFY(button);
+        QVERIFY(!button->isVisible());
+        auto *saveButton = ui.item("saveButton");
+        QVERIFY(saveButton);
+        const auto savePosition = saveButton->mapToScene(QPointF(0, 0));
+        for (int position : {source.indexOf("A | B"), source.indexOf("---"),
+                             source.indexOf("first"), source.indexOf("\n\nBetween")}) {
+            ui.editor->setProperty("cursorPosition", position);
+            QTRY_VERIFY(button->isVisible());
+            QCOMPARE(saveButton->mapToScene(QPointF(0, 0)), savePosition);
+        }
+        // Leaving the final body line immediately removes the contextual hint.
+        QTest::keyClick(ui.window, Qt::Key_Right);
+        QTRY_VERIFY(!button->isVisible());
+        for (const auto &text : {"Between", "After", "Fake", "not | real"}) {
+            ui.editor->setProperty("cursorPosition", source.indexOf(text));
+            QVERIFY(!button->isVisible());
+        }
+        QCOMPARE(saveButton->mapToScene(QPointF(0, 0)), savePosition);
+        ui.editor->setProperty("cursorPosition", source.indexOf("second"));
+        QTRY_VERIFY(button->isVisible());
+        // Row places newly visible controls during its next layout pass.
+        button->parentItem()->ensurePolished();
+        ui.click(button);
+        QTRY_VERIFY(ui.dialog->property("opened").toBool());
+        QCOMPARE(ui.dialog->property("tableIndex").toInt(), 1);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!ui.dialog->property("visible").toBool());
+
+        // The keyboard shortcut remains available from prose.
+        ui.editor->setProperty("cursorPosition", 0);
+        QVERIFY(!button->isVisible());
+        ui.openPreview();
+        QTRY_VERIFY(ui.dialog->property("opened").toBool());
+        QCOMPARE(ui.dialog->property("tableIndex").toInt(), 0);
+        QTest::keyClick(ui.window, Qt::Key_Escape);
+        QTRY_VERIFY(!ui.dialog->property("visible").toBool());
+
+        // Document edits must refresh cached ranges, including undo.
+        ui.editor->setProperty("cursorPosition", source.indexOf("second"));
+        QTest::keyClick(ui.window, Qt::Key_A, Qt::ControlModifier);
+        QTest::keyClick(ui.window, Qt::Key_Backspace);
+        QTRY_VERIFY(!button->isVisible());
+        QTest::keyClick(ui.window, Qt::Key_Z, Qt::ControlModifier);
+        QCOMPARE(ui.editor->property("text").toString(), source);
+        ui.editor->setProperty("cursorPosition", source.indexOf("second"));
+        QTRY_VERIFY(button->isVisible());
     }
 
     void keepsTableButtonLabelReadable_data() {
@@ -272,6 +332,7 @@ private slots:
         TablePreviewHarness ui;
         QVERIFY2(ui.load(source), qPrintable(ui.component.errorString()));
         QTRY_VERIFY(ui.window->isActive());
+        ui.editor->setProperty("cursorPosition", source.indexOf("short"));
         QTRY_VERIFY(ui.item("tablesButton") && ui.item("tablesButton")->isVisible());
         ui.click(ui.item("tablesButton"));
         QTRY_VERIFY(ui.dialog->property("opened").toBool());
@@ -517,7 +578,15 @@ private slots:
     void detectsTablesWithoutRendering() {
         QFETCH(QString, source);
         QFETCH(bool, expected);
-        QCOMPARE(MarkdownTables::containsTable(source), expected);
+        const auto ranges = MarkdownTables::ranges(source);
+        QCOMPARE(!ranges.isEmpty(), expected);
+        const auto tables = MarkdownTables::parse(source);
+        QCOMPARE(ranges.size(), tables.size());
+        for (int i = 0; i < tables.size(); ++i) {
+            QCOMPARE(ranges.at(i).toMap().size(), 2);
+            QCOMPARE(ranges.at(i).toMap().value("start"), tables.at(i).toMap().value("start"));
+            QCOMPARE(ranges.at(i).toMap().value("end"), tables.at(i).toMap().value("end"));
+        }
     }
 
     void keepsLongPreviewsBoundedAndReachesLastRow() {

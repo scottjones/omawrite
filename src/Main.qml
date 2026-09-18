@@ -38,13 +38,18 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
-    property bool hasTables: false
+    property var tableRanges: []
+    readonly property bool hasTables: tableRanges.length > 0
+    readonly property bool caretInTable: {
+        var position = editor.cursorPosition;
+        return tableRanges.some(table => position >= table.start && position <= table.end);
+    }
     property int documentRevision: 0
 
     function showTables() {
         tableRefresh.stop();
         var documentTables = backend.markdownTables(editor.text);
-        hasTables = documentTables.length > 0;
+        tableRanges = documentTables.map(table => ({start: table.start, end: table.end}));
         if (documentTables.length === 0)
             return;
         var current = 0;
@@ -64,7 +69,7 @@ ApplicationWindow {
     Timer {
         id: tableRefresh
         interval: 200
-        onTriggered: win.hasTables = backend.hasMarkdownTable(editor.text)
+        onTriggered: win.tableRanges = backend.markdownTableRanges(editor.text)
     }
 
     Shortcut {
@@ -856,6 +861,7 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
             spacing: 12
+            height: tablesButton.height
 
             FooterIconButton {
                 objectName: "saveButton"
@@ -878,9 +884,10 @@ ApplicationWindow {
             }
 
             Button {
+                id: tablesButton
                 objectName: "tablesButton"
                 text: "Tables"
-                visible: win.hasTables
+                visible: win.caretInTable
                 flat: true
                 height: Math.max(win.scaledSize(28), implicitContentHeight + topPadding + bottomPadding)
                 anchors.verticalCenter: parent.verticalCenter

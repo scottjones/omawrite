@@ -23,6 +23,7 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Ctrl+H` opens find and replace.
 - `Ctrl+Shift+T` opens a readable table preview. Click a cell to select its Markdown
   in the editor, or use Edit Markdown to return to the table's first line.
+  A **Tables** footer button also appears while the caret is inside a table.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 

@@ -5,5 +5,5 @@
 
 namespace MarkdownTables {
 QVariantList parse(const QString &text);
-bool containsTable(const QString &text);
+QVariantList ranges(const QString &text);
 }

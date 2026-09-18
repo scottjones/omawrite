@@ -71,7 +71,7 @@ public:
     Q_INVOKABLE bool editorTextChanged();
     Q_INVOKABLE QVariantList hiddenRangesAt(int position) const;
     Q_INVOKABLE QVariantList markdownTables(const QString &text) const;
-    Q_INVOKABLE bool hasMarkdownTable(const QString &text) const;
+    Q_INVOKABLE QVariantList markdownTableRanges(const QString &text) const;
     Q_INVOKABLE void setSearchHighlight(const QString &query, int currentMatchStart);
     Q_INVOKABLE void openExternalUrl(const QUrl &url);
     Q_INVOKABLE QVariantMap windowGeometry() const;

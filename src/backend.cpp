@@ -366,8 +366,8 @@ QVariantList Backend::markdownTables(const QString &text) const {
     return MarkdownTables::parse(text);
 }
 
-bool Backend::hasMarkdownTable(const QString &text) const {
-    return MarkdownTables::containsTable(text);
+QVariantList Backend::markdownTableRanges(const QString &text) const {
+    return MarkdownTables::ranges(text);
 }
 
 QVariantList Backend::hiddenRangesAt(int position) const {
