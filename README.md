@@ -21,6 +21,8 @@ Install via the Omarchy Package Repository via the `omawrite` package. It's inst
 - `Super+F` toggles fullscreen. Qt maps this key as `Meta+F`.
 - `Ctrl+F` searches the document. Use `Enter` or `Ctrl+G` for the next match and `Shift+Enter` for the previous match.
 - `Ctrl+H` opens find and replace.
+- `Ctrl+Shift+T` opens a readable table preview. Click a cell to select its Markdown
+  in the editor, or use Edit Markdown to return to the table's first line.
 - `Ctrl+B`, `Ctrl+I`, and `Ctrl+K` insert bold, italic, and link Markdown.
 - `Ctrl+?` shows the keyboard shortcut reference.
 

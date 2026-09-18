@@ -38,6 +38,56 @@ ApplicationWindow {
     property string pendingAction: ""
     property bool replaceOpen: false
     property bool awaitingPendingSave: false
+    property bool hasTables: false
+    property int documentRevision: 0
+
+    function showTables() {
+        tableRefresh.stop();
+        var documentTables = backend.markdownTables(editor.text);
+        hasTables = documentTables.length > 0;
+        if (documentTables.length === 0)
+            return;
+        var current = 0;
+        for (var i = 0; i < documentTables.length; ++i) {
+            if (editor.cursorPosition >= documentTables[i].start
+                    && editor.cursorPosition <= documentTables[i].end) {
+                current = i;
+                break;
+            }
+        }
+        tablePreview.tables = documentTables;
+        tablePreview.tableIndex = current;
+        tablePreview.sourceRevision = documentRevision;
+        tablePreview.open();
+    }
+
+    Timer {
+        id: tableRefresh
+        interval: 200
+        onTriggered: win.hasTables = backend.hasMarkdownTable(editor.text)
+    }
+
+    Shortcut {
+        sequence: "Ctrl+Shift+T"
+        onActivated: win.showTables()
+    }
+
+    TablePreviewDialog {
+        id: tablePreview
+        pageColor: win.pageColor
+        textColor: win.textColor
+        fontPixelSize: win.scaledSize(16)
+        containerWidth: win.width
+        containerHeight: win.height
+        onEditRequested: function(start, end) {
+            if (tablePreview.sourceRevision !== win.documentRevision)
+                return;
+            editor.forceActiveFocus();
+            editor.select(start, end);
+            editorFlick.ensureCursorVisible();
+        }
+        onClosed: editor.forceActiveFocus()
+    }
 
     Material.theme: darkMode ? Material.Dark : Material.Light
     Material.accent: backend.themeAccent
@@ -331,7 +381,7 @@ ApplicationWindow {
         standardButtons: Dialog.Close
         anchors.centerIn: parent
         contentItem: Label {
-            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
+            text: "Ctrl+S  Save\nCtrl+Shift+S  Save As\nCtrl+O  Open\nCtrl+N  New Window\nCtrl+F  Find\nCtrl+H  Find and Replace\nCtrl+Shift+T  Preview Tables\nCtrl+B  Bold\nCtrl+I  Italic\nCtrl+K  Link\nCtrl+P  Print\nF11 / Super+F  Fullscreen\nCtrl+?  Shortcuts"
             lineHeight: 1.5
         }
     }
@@ -771,6 +821,9 @@ ApplicationWindow {
                 }
 
                 onTextChanged: {
+                    win.documentRevision++;
+                    tablePreview.invalidate();
+                    tableRefresh.restart();
                     if (win.searchUpdating)
                         return;
                     var contentChanged = backend.editorTextChanged();
@@ -803,10 +856,11 @@ ApplicationWindow {
             anchors.leftMargin: 12
             anchors.bottomMargin: 10
             spacing: 12
-            opacity: 0.55
 
             FooterIconButton {
                 objectName: "saveButton"
+                opacity: 0.55
+                anchors.verticalCenter: parent.verticalCenter
                 iconName: "save"
                 iconColor: win.mutedColor
                 tooltip: "Save"
@@ -815,14 +869,37 @@ ApplicationWindow {
 
             FooterIconButton {
                 objectName: "openButton"
+                opacity: 0.55
+                anchors.verticalCenter: parent.verticalCenter
                 iconName: "open"
                 iconColor: win.mutedColor
                 tooltip: "Open"
                 onClicked: backend.openDialog()
             }
 
+            Button {
+                objectName: "tablesButton"
+                text: "Tables"
+                visible: win.hasTables
+                flat: true
+                height: Math.max(win.scaledSize(28), implicitContentHeight + topPadding + bottomPadding)
+                anchors.verticalCenter: parent.verticalCenter
+                topInset: 0
+                bottomInset: 0
+                verticalPadding: win.scaledSize(4)
+                leftPadding: win.scaledSize(10)
+                rightPadding: win.scaledSize(10)
+                font.pixelSize: win.scaledSize(12)
+                Material.foreground: win.textColor
+                onClicked: win.showTables()
+                ToolTip.visible: hovered
+                ToolTip.text: "Read tables · Ctrl+Shift+T"
+            }
+
             Label {
                 text: backend.status
+                opacity: 0.55
+                anchors.verticalCenter: parent.verticalCenter
                 color: win.mutedColor
                 font.family: "iA Writer Mono S"
                 font.pixelSize: win.scaledSize(11)

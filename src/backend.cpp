@@ -32,6 +32,7 @@
 #include <algorithm>
 
 #include "markdownhighlighter.h"
+#include "markdowntables.h"
 
 constexpr qreal typoraLineHeightPercent = 140;
 const QString lastSaveDirectorySetting = QStringLiteral("file/lastSaveDirectory");
@@ -359,6 +360,14 @@ bool Backend::editorTextChanged() {
     setStatus(QStringLiteral("Unsaved"));
     scheduleRecovery();
     return true;
+}
+
+QVariantList Backend::markdownTables(const QString &text) const {
+    return MarkdownTables::parse(text);
+}
+
+bool Backend::hasMarkdownTable(const QString &text) const {
+    return MarkdownTables::containsTable(text);
 }
 
 QVariantList Backend::hiddenRangesAt(int position) const {
